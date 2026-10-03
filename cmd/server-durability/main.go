@@ -32,9 +32,10 @@ const usage = `server-durability: what would this machine lose, and when?
 
   audit     every store, the backup, the copies, the last rehearsed restore, the services: what is in order,
             what depends on luck, what would be lost. Reads only. -strict makes a warning fail too
-  stage     write consistent copies of the live SQLite databases into the stage directory (run before a backup)
-  covers    is every declared store in the newest snapshot?
-  drill     rehearse a restore: take every store out of the newest snapshot, open it, record the result
+  stage     make a safe copy of each live SQLite database in the stage directory (run it before a backup)
+  covers    ask the newest backup: is every declared store really in it?
+  drill     test the backup: restore every store into a temporary folder, open and check it, delete the
+            folder, and record whether it worked. The real data is not touched
   init      print an example declaration
   version
 
