@@ -130,6 +130,9 @@ location = "off-site"
 	if err := json.Unmarshal([]byte(out), &result); err != nil || code != 0 || !result.OK || len(result.Items) != 2 || result.Items[0].Restored["t"] != 2000 {
 		t.Fatalf("restore-test: exit %d, %v\n%s", code, err, out)
 	}
+	if !strings.Contains(out, "restored, 1 entry at the top level") || !strings.Contains(out, "1 table, 2000 rows") {
+		t.Fatalf("the report's wording: %s", out)
+	}
 	if left, _ := filepath.Glob(filepath.Join(dir, "state", "restore-test-*")); len(left) != 0 {
 		t.Fatalf("the scratch directory stayed: %v", left)
 	}
