@@ -25,13 +25,13 @@ func TestTheExampleLoadsAndPathsAreExpanded(t *testing.T) {
 		t.Fatal(err)
 	}
 	home, _ := os.UserHomeDir()
-	if len(c.Stores) != 2 || c.Stores[0].Path != filepath.Join(home, "app/data/app.db") || c.Stores[1].Kind != "directory" {
-		t.Fatalf("stores: %+v", c.Stores)
+	if len(c.Data) != 2 || c.Data[0].Path != filepath.Join(home, "app/data/app.db") || c.Data[1].Kind != "directory" {
+		t.Fatalf("data: %+v", c.Data)
 	}
-	if c.SnapshotPath(c.Stores[0]) != filepath.Join(home, "backups/sqlite/app.db") || c.SnapshotPath(c.Stores[1]) != c.Stores[1].Path {
-		t.Fatalf("a database is looked for as its staged copy, a directory as itself: %s", c.SnapshotPath(c.Stores[0]))
+	if c.SnapshotPath(c.Data[0]) != filepath.Join(home, "backups/sqlite/app.db") || c.SnapshotPath(c.Data[1]) != c.Data[1].Path {
+		t.Fatalf("a database is looked for as its consistent copy, a directory as itself: %s", c.SnapshotPath(c.Data[0]))
 	}
-	if c.Backup.MaxAgeHours != 30 || c.Drill.MaxAgeDays != 35 || len(c.Copies) != 1 || !c.Workers[0].User {
+	if c.Backup.MaxAgeHours != 30 || c.RestoreTest.MaxAgeDays != 35 || len(c.BackupCopies) != 1 || !c.Services[0].User {
 		t.Fatalf("defaults and lists: %+v", c)
 	}
 }
@@ -39,29 +39,29 @@ func TestTheExampleLoadsAndPathsAreExpanded(t *testing.T) {
 func TestEveryProblemIsNamedAtOnce(t *testing.T) {
 	_, err := Load(write(t, `
 colour = "blue"
-[[store]]
+[[data]]
 name = "a"
 path = "/x"
 kind = "postgres"
-[[store]]
+[[data]]
 name = "a"
 path = "/y"
 [backup]
 tool = "tar"
-[[copy]]
+[[backup_copy]]
 name = "cloud"
-where = "somewhere"
+location = "somewhere"
 `))
 	if err == nil {
-		t.Fatal("this declaration must be refused")
+		t.Fatal("this config file must be rejected")
 	}
-	for _, want := range []string{`unknown key "colour"`, `kind is sqlite, file or directory, not "postgres"`, `two stores are named "a"`,
+	for _, want := range []string{`unknown key "colour"`, `kind must be sqlite, file or directory, not "postgres"`, `two [[data]] entries are named "a"`,
 		`backup tool "tar" is not supported yet`, "[backup] needs a repository", `not "somewhere"`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error does not say %q: %v", want, err)
 		}
 	}
-	if _, err := Load(write(t, "")); err == nil || !strings.Contains(err.Error(), "no [[store]]") {
-		t.Fatalf("an empty declaration: %v", err)
+	if _, err := Load(write(t, "")); err == nil || !strings.Contains(err.Error(), "no [[data]] entry") {
+		t.Fatalf("an empty config file: %v", err)
 	}
 }

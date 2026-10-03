@@ -102,21 +102,21 @@ func has(t *testing.T, got []string, wants ...string) {
 func TestAMachineInGoodOrderHasNothingToFix(t *testing.T) {
 	root, env := machine(t)
 	c := &config.Config{StateDir: filepath.Join(root, "state")}
-	c.Stores = []config.Store{{Name: "app", Path: filepath.Join(root, "data", "app.db"), Kind: "sqlite"}, {Name: "uploads", Path: filepath.Join(root, "data", "uploads"), Kind: "directory"}}
-	database(t, c.Stores[0].Path)
-	os.MkdirAll(c.Stores[1].Path, 0o755)
-	c.Stage.Dir = filepath.Join(root, "data", "staged")
-	database(t, c.SnapshotPath(c.Stores[0]))
-	os.Chtimes(c.SnapshotPath(c.Stores[0]), now.Add(-time.Hour), now.Add(-time.Hour))
+	c.Data = []config.Data{{Name: "app", Path: filepath.Join(root, "data", "app.db"), Kind: "sqlite"}, {Name: "uploads", Path: filepath.Join(root, "data", "uploads"), Kind: "directory"}}
+	database(t, c.Data[0].Path)
+	os.MkdirAll(c.Data[1].Path, 0o755)
+	c.DBCopies.Dir = filepath.Join(root, "data", "staged")
+	database(t, c.SnapshotPath(c.Data[0]))
+	os.Chtimes(c.SnapshotPath(c.Data[0]), now.Add(-time.Hour), now.Add(-time.Hour))
 	c.Backup = config.Backup{Tool: "restic", Repository: filepath.Join(root, "other", "repo"), MaxAgeHours: 30}
-	c.Copies = []config.Copy{{Name: "cloud", Where: "off-site"}}
-	c.Workers = []config.Worker{{Unit: "app.service", User: true}}
-	c.Drill.MaxAgeDays = 35
+	c.BackupCopies = []config.BackupCopy{{Name: "cloud", Location: "off-site"}}
+	c.Services = []config.Service{{Unit: "app.service", User: true}}
+	c.RestoreTest.MaxAgeDays = 35
 	os.MkdirAll(c.StateDir, 0o755)
-	drill, _ := json.Marshal(DrillResult{Time: now.Add(-48 * time.Hour), OK: true})
-	os.WriteFile(DrillFile(c), drill, 0o644)
+	report, _ := json.Marshal(RestoreTest{Time: now.Add(-48 * time.Hour), OK: true})
+	os.WriteFile(RestoreTestFile(c), report, 0o644)
 	env.Tool = &fakeTool{snap: backup.Snapshot{ID: "abc123", Time: now.Add(-5 * time.Hour)},
-		paths: map[string]bool{c.SnapshotPath(c.Stores[0]): true, c.Stores[1].Path: true}}
+		paths: map[string]bool{c.SnapshotPath(c.Data[0]): true, c.Data[1].Path: true}}
 	env.Run = func(_ context.Context, _ string, args ...string) (string, error) {
 		if strings.Contains(strings.Join(args, " "), "is-enabled app.service") {
 			return "enabled\n", nil
@@ -124,12 +124,12 @@ func TestAMachineInGoodOrderHasNothingToFix(t *testing.T) {
 		return "", nil
 	}
 	got := Run(context.Background(), c, env)
-	if fails, warns := lines(got, Fail), lines(got, Warn); len(fails)+len(warns) != 0 {
+	if fails, warns := lines(got, Error), lines(got, Warning); len(fails)+len(warns) != 0 {
 		t.Fatalf("nothing should need fixing:\n%s\n%s", strings.Join(fails, "\n"), strings.Join(warns, "\n"))
 	}
-	has(t, lines(got, OK), "a SQLite database in WAL mode", "newest snapshot (abc123) is 5 hours old", "in the newest snapshot", "rehearsed 48 hours ago", "starts by itself", "1 of them off-site")
-	has(t, lines(got, Note), "disk nvme0n1: a volatile write cache under app, uploads")
-	if Worst(got) != Note {
+	has(t, lines(got, OK), "SQLite database, WAL mode", "latest snapshot (abc123) is 5 hours old", "in the latest snapshot", "last restore test: 48 hours ago", "starts automatically", "1 off-site")
+	has(t, lines(got, Info), "disk nvme0n1: has a volatile write cache (used by: app, uploads)")
+	if Worst(got) != Info {
 		t.Fatalf("the worst level is %s", Worst(got))
 	}
 }
@@ -137,19 +137,19 @@ func TestAMachineInGoodOrderHasNothingToFix(t *testing.T) {
 func TestEveryWayToLoseDataIsNamed(t *testing.T) {
 	root, env := machine(t)
 	c := &config.Config{StateDir: filepath.Join(root, "state")}
-	c.Stores = []config.Store{
+	c.Data = []config.Data{
 		{Name: "app", Path: filepath.Join(root, "data", "app.db"), Kind: "sqlite"},
 		{Name: "cache", Path: filepath.Join(root, "ram", "session.db"), Kind: "sqlite"},
 		{Name: "gone", Path: filepath.Join(root, "data", "gone"), Kind: "directory"},
 		{Name: "fake", Path: filepath.Join(root, "data", "fake.db"), Kind: "sqlite"},
 	}
-	database(t, c.Stores[0].Path)
-	database(t, c.Stores[1].Path)
-	os.WriteFile(c.Stores[3].Path, []byte(strings.Repeat("not a database ", 10)), 0o644)
+	database(t, c.Data[0].Path)
+	database(t, c.Data[1].Path)
+	os.WriteFile(c.Data[3].Path, []byte(strings.Repeat("not a database ", 10)), 0o644)
 	c.Backup = config.Backup{Tool: "restic", Repository: filepath.Join(root, "data", "repo"), MaxAgeHours: 30} // the same disk as the data
-	c.Workers = []config.Worker{{Unit: "app.service", User: true}, {Unit: "typo.service"}}
-	c.Drill.MaxAgeDays = 35
-	env.Tool = &fakeTool{snap: backup.Snapshot{ID: "old111", Time: now.Add(-9 * 24 * time.Hour)}, paths: map[string]bool{c.Stores[1].Path: true}}
+	c.Services = []config.Service{{Unit: "app.service", User: true}, {Unit: "typo.service"}}
+	c.RestoreTest.MaxAgeDays = 35
+	env.Tool = &fakeTool{snap: backup.Snapshot{ID: "old111", Time: now.Add(-9 * 24 * time.Hour)}, paths: map[string]bool{c.Data[1].Path: true}}
 	env.Run = func(_ context.Context, _ string, args ...string) (string, error) {
 		a := strings.Join(args, " ")
 		switch {
@@ -165,45 +165,45 @@ func TestEveryWayToLoseDataIsNamed(t *testing.T) {
 		return "", nil
 	}
 	got := Run(context.Background(), c, env)
-	has(t, lines(got, Fail),
-		"gone: the store is not there",
-		"cache: it is on tmpfs",
+	has(t, lines(got, Error),
+		"gone: path not found",
+		"cache: stored on tmpfs",
 		"fake: ", "not a SQLite database",
-		"backup: the repository is on the same disk (nvme0n1) as app, fake: when that disk dies, the data and its only backup die together",
-		"backup: the newest snapshot (old111) is 9 days old; the declaration allows 30 hours",
-		"app: not in the newest snapshot",
-		"app.service: does not start after a restart (disabled)",
+		"backup: the backup repository is on the same disk (nvme0n1) as the data (app, fake): if this disk fails, the data and its only backup are both lost",
+		"backup: the latest snapshot (old111) is 9 days old; the config allows 30 hours",
+		"app: missing from the latest snapshot",
+		"app.service: is not enabled (disabled)",
 		"typo.service: systemd does not know this unit")
-	for _, l := range lines(got, Warn) {
-		if strings.Contains(l, "declared as the only copy") {
+	for _, l := range lines(got, Warning) {
+		if strings.Contains(l, "is the only copy") {
 			t.Errorf("said twice: the only copy already fails for sharing the disk: %s", l)
 		}
 	}
-	has(t, lines(got, Warn),
-		"backup: live databases are copied as plain files (app, cache, fake)",
-		"restore: a restore has never been rehearsed",
+	has(t, lines(got, Warning),
+		"backup: live SQLite databases are backed up as plain files (app, cache, fake)",
+		"restore test: the backup has never been restore-tested",
 		"run-u42.service: a transient user unit",
-		"nightly.timer: a calendar timer without Persistent=true")
-	for _, l := range append(lines(got, Warn), lines(got, Fail)...) {
-		if strings.Contains(l, "fresh.service") || strings.Contains(l, "often.timer") || strings.HasPrefix(l, "gone: not in the newest") {
+		"nightly.timer: calendar timer without Persistent=true")
+	for _, l := range append(lines(got, Warning), lines(got, Error)...) {
+		if strings.Contains(l, "fresh.service") || strings.Contains(l, "often.timer") || strings.HasPrefix(l, "gone: missing from the latest") {
 			t.Errorf("should not be reported: %s", l)
 		}
 	}
-	if Worst(got) != Fail {
+	if Worst(got) != Error {
 		t.Fatalf("the worst level is %s", Worst(got))
 	}
-	c.Copies = []config.Copy{{Name: "laptop", Where: "same-site"}}
+	c.BackupCopies = []config.BackupCopy{{Name: "laptop", Location: "same-site"}}
 	withCopy := Run(context.Background(), c, env)
-	has(t, lines(withCopy, Warn), "same disk (nvme0n1) as app, fake: when that disk dies, what remains is the declared copy (laptop)", "every copy of the repository is in one place")
-	for _, l := range lines(withCopy, Fail) {
+	has(t, lines(withCopy, Warning), "same disk (nvme0n1) as the data (app, fake): if this disk fails, only the other backup copy (laptop) is left", "there is no off-site backup copy")
+	for _, l := range lines(withCopy, Error) {
 		if strings.Contains(l, "same disk") {
 			t.Errorf("with a copy elsewhere, a shared disk is a warning: %s", l)
 		}
 	}
 	env.Tool = nil
-	has(t, lines(Run(context.Background(), c, env), Fail), "backup: no backup is declared")
+	has(t, lines(Run(context.Background(), c, env), Error), "backup: no backup is configured")
 	env.Tool = &fakeTool{err: backup.ErrNoSnapshot}
-	has(t, lines(Run(context.Background(), c, env), Fail), "the repository holds no snapshot")
+	has(t, lines(Run(context.Background(), c, env), Error), "the backup repository has no snapshots")
 	env.ProcRoot = filepath.Join(root, "nowhere")
-	has(t, lines(Run(context.Background(), c, env), Note), "file systems and disks are not checked on this system")
+	has(t, lines(Run(context.Background(), c, env), Info), "file system and disk checks are skipped on this system")
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# demo.sh: a throwaway "machine" in a temporary directory, audited before and after it is put in order.
+# demo.sh: a throwaway "server" in a temporary directory, checked before and after it is fixed.
 # Needs: server-durability on PATH (or SD=/path/to/it), restic, python3. Touches nothing outside its directory.
 set -euo pipefail
 SD="${SD:-server-durability}"
@@ -15,16 +15,16 @@ export RESTIC_REPOSITORY="$D/repo" RESTIC_PASSWORD_FILE="$D/password"
 restic init -q
 cat > "$D/config.toml" <<TOML
 state_dir = "$D/state"
-[[store]]
+[[data]]
 name = "orders"
 path = "$D/app/app.db"
 kind = "sqlite"
-[[store]]
+[[data]]
 name = "uploads"
 path = "$D/app/uploads"
 kind = "directory"
-[stage]
-dir = "$D/staged"
+[db_copies]
+dir = "$D/db-copies"
 [backup]
 tool = "restic"
 repository = "$D/repo"
@@ -32,13 +32,13 @@ password_file = "$D/password"
 TOML
 show() { echo; echo "\$ server-durability $*"; "$SD" -config "$D/config.toml" "$@" | sed "s#$D#/srv#g" || true; }
 
-echo "== 1. A backup exists, and takes the uploads only =="
+echo "== 1. There is a backup, but it only contains the uploads =="
 restic backup -q "$D/app/uploads"
-show audit
+show check
 
-echo; echo "== 2. Stage the database, back up everything, rehearse the restore =="
-show stage
-restic backup -q "$D/staged" "$D/app/uploads"
-show covers
-show drill
-show audit
+echo; echo "== 2. Copy the database, back up everything, test the restore =="
+show copy-db
+restic backup -q "$D/db-copies" "$D/app/uploads"
+show verify
+show restore-test
+show check

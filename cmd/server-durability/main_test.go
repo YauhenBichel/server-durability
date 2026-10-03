@@ -30,13 +30,13 @@ func capture(t *testing.T, args ...string) (int, string) {
 	return code, string(out)
 }
 
-// The whole path with a real restic: stage, back up, ask the snapshot, rehearse the restore, audit.
-func TestStageBackupCoversDrillAudit(t *testing.T) {
+// The whole flow with a real restic: copy the database, back up, verify, restore-test, check.
+func TestCopyBackupVerifyRestoreTestCheck(t *testing.T) {
 	restic, err := exec.LookPath("restic")
 	if err != nil {
 		t.Skip("restic is not installed")
 	}
-	// every path of the declaration goes through a symbolic link, as a home directory on another disk does:
+	// every path in the config file goes through a symbolic link, as a home directory on another disk does:
 	// the backup is given the link's path, and the snapshot holds it that way
 	real, _ := filepath.EvalSymlinks(t.TempDir())
 	dir := filepath.Join(real, "link")
@@ -68,23 +68,23 @@ func TestStageBackupCoversDrillAudit(t *testing.T) {
 	cfg := filepath.Join(dir, "config.toml")
 	os.WriteFile(cfg, []byte(fmt.Sprintf(`
 state_dir = %q
-[[store]]
+[[data]]
 name = "app"
 path = %q
 kind = "sqlite"
-[[store]]
+[[data]]
 name = "uploads"
 path = %q
 kind = "directory"
-[stage]
+[db_copies]
 dir = %q
 [backup]
 tool = "restic"
 repository = %q
 password_file = %q
-[[copy]]
+[[backup_copy]]
 name = "elsewhere"
-where = "off-site"
+location = "off-site"
 `, filepath.Join(dir, "state"), live, uploads, staged, repo, pass)), 0o644)
 	rs := func(args ...string) {
 		t.Helper()
@@ -95,88 +95,88 @@ where = "off-site"
 	rs("init")
 
 	// before anything is backed up: the audit says so, and exits 1
-	code, out := capture(t, "-config", cfg, "audit")
-	if code != 1 || !strings.Contains(out, "the repository holds no snapshot") || !strings.Contains(out, "no staged copy yet") {
-		t.Fatalf("audit of an empty repository: exit %d\n%s", code, out)
+	code, out := capture(t, "-config", cfg, "check")
+	if code != 1 || !strings.Contains(out, "the backup repository has no snapshots") || !strings.Contains(out, "no database copy yet") {
+		t.Fatalf("check of an empty repository: exit %d\n%s", code, out)
 	}
 
-	// a backup that takes only the uploads: `covers` names the database as missing
+	// a backup that contains only the uploads: `verify` reports the database as missing
 	rs("backup", uploads)
-	code, out = capture(t, "-config", cfg, "covers")
-	if code != 1 || !strings.Contains(out, "FAIL  app") || !strings.Contains(out, "not in the newest snapshot") || !strings.Contains(out, "ok    uploads") {
-		t.Fatalf("covers with the database left out: exit %d\n%s", code, out)
+	code, out = capture(t, "-config", cfg, "verify")
+	if code != 1 || !strings.Contains(out, "ERROR app") || !strings.Contains(out, "missing from the latest snapshot") || !strings.Contains(out, "OK    uploads") {
+		t.Fatalf("verify with the database left out: exit %d\n%s", code, out)
 	}
 
-	// stage, then back up the staged copy and the uploads
-	code, out = capture(t, "-config", cfg, "stage")
-	if code != 0 || !strings.Contains(out, "ok    app") {
-		t.Fatalf("stage: exit %d\n%s", code, out)
+	// copy the database, then back up the copy and the uploads
+	code, out = capture(t, "-config", cfg, "copy-db")
+	if code != 0 || !strings.Contains(out, "OK    app") {
+		t.Fatalf("copy-db: exit %d\n%s", code, out)
 	}
 	rs("backup", staged, uploads)
-	if code, out = capture(t, "-config", cfg, "covers"); code != 0 {
-		t.Fatalf("covers after a full backup: exit %d\n%s", code, out)
+	if code, out = capture(t, "-config", cfg, "verify"); code != 0 {
+		t.Fatalf("verify after a full backup: exit %d\n%s", code, out)
 	}
 
-	// the rehearsal restores, opens, counts: all 2000 committed rows, though the live main file holds none
-	code, out = capture(t, "-config", cfg, "-json", "drill")
+	// the restore test restores, opens, counts: all 2000 committed rows, though the live main file holds none
+	code, out = capture(t, "-config", cfg, "-json", "restore-test")
 	var result struct {
-		OK     bool
-		Stores []struct {
+		OK    bool
+		Items []struct {
 			Name     string
 			OK       bool
 			Restored map[string]int64 `json:"restored_rows"`
 		}
 	}
-	if err := json.Unmarshal([]byte(out), &result); err != nil || code != 0 || !result.OK || len(result.Stores) != 2 || result.Stores[0].Restored["t"] != 2000 {
-		t.Fatalf("drill: exit %d, %v\n%s", code, err, out)
+	if err := json.Unmarshal([]byte(out), &result); err != nil || code != 0 || !result.OK || len(result.Items) != 2 || result.Items[0].Restored["t"] != 2000 {
+		t.Fatalf("restore-test: exit %d, %v\n%s", code, err, out)
 	}
-	if left, _ := filepath.Glob(filepath.Join(dir, "state", "drill-*")); len(left) != 0 {
+	if left, _ := filepath.Glob(filepath.Join(dir, "state", "restore-test-*")); len(left) != 0 {
 		t.Fatalf("the scratch directory stayed: %v", left)
 	}
 
-	// now the audit has nothing that would lose data
-	code, out = capture(t, "-config", cfg, "audit", "-json")
+	// now the check finds no errors
+	code, out = capture(t, "-config", cfg, "check", "-json")
 	var report struct {
 		Worst    string
 		Findings []struct{ Level, Subject, Message string }
 	}
-	if err := json.Unmarshal([]byte(out), &report); err != nil || code != 0 || report.Worst == "fail" {
-		t.Fatalf("audit after everything: exit %d, %v\n%s", code, err, out)
+	if err := json.Unmarshal([]byte(out), &report); err != nil || code != 0 || report.Worst == "error" {
+		t.Fatalf("check after everything: exit %d, %v\n%s", code, err, out)
 	}
 	said := ""
 	for _, f := range report.Findings {
 		said += f.Level + " " + f.Subject + ": " + f.Message + "\n"
 	}
-	for _, want := range []string{"ok app: in the newest snapshot", "ok restore: a restore was rehearsed", "ok backup: the newest snapshot"} {
+	for _, want := range []string{"ok app: in the latest snapshot", "ok restore test: last restore test", "ok backup: the latest snapshot"} {
 		if !strings.Contains(said, want) {
-			t.Errorf("the audit does not say %q:\n%s", want, said)
+			t.Errorf("the check does not say %q:\n%s", want, said)
 		}
 	}
 
-	// a snapshot whose staged copy is damaged: the rehearsal fails, and the next audit says the restore failed
+	// a snapshot whose database copy is damaged: the restore test fails, and the next check reports it
 	os.WriteFile(filepath.Join(staged, "app.db"), []byte(strings.Repeat("damaged ", 2000)), 0o644)
 	rs("backup", staged, uploads)
-	if code, out = capture(t, "-config", cfg, "drill"); code != 1 || !strings.Contains(out, "FAIL  app") {
-		t.Fatalf("drill on a damaged copy: exit %d\n%s", code, out)
+	if code, out = capture(t, "-config", cfg, "restore-test"); code != 1 || !strings.Contains(out, "ERROR app") {
+		t.Fatalf("restore-test on a damaged copy: exit %d\n%s", code, out)
 	}
-	if code, out = capture(t, "-config", cfg, "audit"); code != 1 || !strings.Contains(out, "the last rehearsed restore") || !strings.Contains(out, "failed") {
-		t.Fatalf("audit after a failed drill: exit %d\n%s", code, out)
+	if code, out = capture(t, "-config", cfg, "check"); code != 1 || !strings.Contains(out, "the last restore test") || !strings.Contains(out, "failed") {
+		t.Fatalf("check after a failed restore test: exit %d\n%s", code, out)
 	}
 }
 
 func TestCommandLine(t *testing.T) {
-	if code, out := capture(t, "init"); code != 0 || !strings.Contains(out, "[[store]]") {
+	if code, out := capture(t, "init"); code != 0 || !strings.Contains(out, "[[data]]") {
 		t.Fatalf("init: %d", code)
 	}
 	if code, out := capture(t, "version"); code != 0 || !strings.HasPrefix(out, "server-durability ") {
 		t.Fatalf("version: %d %q", code, out)
 	}
-	for _, args := range [][]string{{}, {"dance"}, {"audit", "extra"}, {"-nope", "audit"}} {
+	for _, args := range [][]string{{}, {"dance"}, {"check", "extra"}, {"-nope", "check"}} {
 		if code, _ := capture(t, args...); code != 2 {
 			t.Errorf("%v: exit %d, want 2", args, code)
 		}
 	}
-	if code, _ := capture(t, "-config", filepath.Join(t.TempDir(), "none.toml"), "audit"); code != 3 {
-		t.Errorf("a missing declaration: exit %d, want 3", code)
+	if code, _ := capture(t, "-config", filepath.Join(t.TempDir(), "none.toml"), "check"); code != 3 {
+		t.Errorf("a missing config file: exit %d, want 3", code)
 	}
 }

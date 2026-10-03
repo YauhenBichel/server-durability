@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-func TestAppendLineAndReplaceFile(t *testing.T) {
+func TestAppendLineAndWriteFileAtomic(t *testing.T) {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "log")
 	for _, line := range []string{"one", "two"} {
@@ -27,7 +27,7 @@ func TestAppendLineAndReplaceFile(t *testing.T) {
 	}
 	state := filepath.Join(dir, "state.json")
 	for _, v := range []string{`{"v":1}`, `{"v":2}`} {
-		if err := ReplaceFile(state, []byte(v), 0o600); err != nil {
+		if err := WriteFileAtomic(state, []byte(v), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -39,12 +39,12 @@ func TestAppendLineAndReplaceFile(t *testing.T) {
 	if left, _ := filepath.Glob(filepath.Join(dir, "*"+TempMark+"*")); len(left) != 0 {
 		t.Fatalf("temporary files left after clean writes: %v", left)
 	}
-	if err := ReplaceFile(filepath.Join(dir, "missing", "x"), []byte("x"), 0o644); err == nil {
+	if err := WriteFileAtomic(filepath.Join(dir, "missing", "x"), []byte("x"), 0o644); err == nil {
 		t.Fatal("a replace into a directory that does not exist must fail")
 	}
 }
 
-func TestSweepTempRemovesOnlyOldLeftovers(t *testing.T) {
+func TestRemoveTempFilesRemovesOnlyOldLeftovers(t *testing.T) {
 	dir := t.TempDir()
 	old := filepath.Join(dir, "state.json"+TempMark+"111")
 	fresh := filepath.Join(dir, "state.json"+TempMark+"222")
@@ -54,7 +54,7 @@ func TestSweepTempRemovesOnlyOldLeftovers(t *testing.T) {
 	}
 	past := time.Now().Add(-2 * time.Hour)
 	os.Chtimes(old, past, past)
-	removed, err := SweepTemp(dir, time.Hour)
+	removed, err := RemoveTempFiles(dir, time.Hour)
 	if err != nil || len(removed) != 1 || removed[0] != filepath.Base(old) {
 		t.Fatalf("removed %v, err %v", removed, err)
 	}
@@ -65,9 +65,9 @@ func TestSweepTempRemovesOnlyOldLeftovers(t *testing.T) {
 	}
 }
 
-// TestReplaceFileSurvivesKill kills a process that replaces a file, at a random moment, many times. The file
+// TestWriteFileAtomicSurvivesKill kills a process that replaces a file, at a random moment, many times. The file
 // must always be whole: the old content or the new. The helper below is this test binary run again.
-func TestReplaceFileSurvivesKill(t *testing.T) {
+func TestWriteFileAtomicSurvivesKill(t *testing.T) {
 	if testing.Short() {
 		t.Skip("spawns and kills 150 processes")
 	}
@@ -99,8 +99,8 @@ func TestReplaceFileSurvivesKill(t *testing.T) {
 		t.Fatalf("%d of 150 kills left a broken file", broken)
 	}
 	left, _ := filepath.Glob(filepath.Join(dir, "*"+TempMark+"*"))
-	t.Logf("150 kills, %d replaces finished first, 0 broken files, %d temporary files left for SweepTemp", finished, len(left))
-	removed, err := SweepTemp(dir, 0)
+	t.Logf("150 kills, %d replaces finished first, 0 broken files, %d temporary files left for RemoveTempFiles", finished, len(left))
+	removed, err := RemoveTempFiles(dir, 0)
 	if err != nil || len(removed) != len(left) {
 		t.Fatalf("sweep removed %d of %d leftovers: %v", len(removed), len(left), err)
 	}
@@ -111,7 +111,7 @@ func TestHelperReplace(t *testing.T) {
 	if target == "" {
 		t.Skip("only as a helper process")
 	}
-	if err := ReplaceFile(target, []byte(strings.Repeat("x", 100_000)), 0o644); err != nil {
+	if err := WriteFileAtomic(target, []byte(strings.Repeat("x", 100_000)), 0o644); err != nil {
 		os.Exit(1)
 	}
 }

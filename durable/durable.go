@@ -9,7 +9,7 @@
 // directory, sync it, rename it over the target, then sync the directory, because the rename itself is not
 // on the disk until the directory is. The third call is the one most often forgotten.
 //
-// A process killed in the middle leaves its temporary file behind. Nothing runs after SIGKILL, so SweepTemp
+// A process killed in the middle leaves its temporary file behind. Nothing runs after SIGKILL, so RemoveTempFiles
 // exists: call it when the program starts.
 package durable
 
@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-// TempMark is in the name of every temporary file this package makes, so SweepTemp can find them.
+// TempMark is in the name of every temporary file this package makes, so RemoveTempFiles can find them.
 const TempMark = ".durable-tmp-"
 
 // SyncDir makes a rename, a creation or a removal inside dir reach the disk.
@@ -65,9 +65,9 @@ func AppendLine(path, line string) error {
 	return nil
 }
 
-// ReplaceFile puts data at path atomically and durably. After a crash at any moment path holds either what
+// WriteFileAtomic writes data to path atomically and durably: a temporary file, fsync, rename, fsync of the directory. After a crash at any moment path holds either what
 // it held before or data, whole. A reader never sees a partial file.
-func ReplaceFile(path string, data []byte, perm os.FileMode) error {
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+TempMark+"*")
 	if err != nil {
@@ -102,9 +102,9 @@ func ReplaceFile(path string, data []byte, perm os.FileMode) error {
 	return SyncDir(dir)
 }
 
-// SweepTemp removes the temporary files that killed writers left in dir, when they are older than olderThan
+// RemoveTempFiles removes the temporary files that killed writers left in dir, when they are older than olderThan
 // (so a writer at work now is not disturbed). It returns the names it removed.
-func SweepTemp(dir string, olderThan time.Duration) ([]string, error) {
+func RemoveTempFiles(dir string, olderThan time.Duration) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
