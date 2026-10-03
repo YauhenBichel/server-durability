@@ -1,0 +1,6 @@
+/dist/
+/server-durability
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
