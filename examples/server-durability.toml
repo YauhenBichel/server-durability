@@ -1,31 +1,31 @@
-# server-durability: the declaration of this machine. Every command reads it.
+# server-durability config file. Every command reads it.
 
-[[store]]                     # something this machine must not lose
+[[data]]                      # a file, directory or database this machine must not lose
 name = "app"
 path = "~/app/data/app.db"
 kind = "sqlite"               # sqlite | file | directory
 
-[[store]]
+[[data]]
 name = "uploads"
 path = "~/app/uploads"
 kind = "directory"
 
-[stage]                       # consistent copies of the live databases go here; back this directory up
+[db_copies]                   # consistent copies of live SQLite databases are written here; back this directory up
 dir = "~/backups/sqlite"
 
 [backup]
 tool = "restic"
 repository = "~/backups/restic"
 password_file = "~/.config/restic/password"
-max_age_hours = 30            # the newest snapshot must be younger
+max_age_hours = 30            # the latest snapshot must be newer than this
 
-[[copy]]                      # every other place the repository exists
+[[backup_copy]]               # every other place where the backup repository is kept
 name = "laptop mirror"
-where = "same-site"           # same-disk | same-site | off-site
+location = "same-site"        # same-disk | same-site | off-site
 
-[[worker]]                    # services that must start again by themselves after a restart
+[[service]]                   # systemd units that must start again after a reboot
 unit = "app.service"
-user = true                   # a unit of your own systemd manager (systemctl --user)
+user = true                   # a user unit (systemctl --user)
 
-[drill]
-max_age_days = 35             # a restore must have been rehearsed more recently
+[restore_test]
+max_age_days = 35             # the backup must have been restore-tested more recently than this

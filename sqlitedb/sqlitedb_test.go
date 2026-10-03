@@ -39,7 +39,7 @@ func live(t *testing.T, path string) (*sql.DB, *sql.Tx) {
 	return db, open
 }
 
-func TestStageCopiesExactlyWhatIsCommitted(t *testing.T) {
+func TestBackupCopiesExactlyWhatIsCommitted(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "live.db")
 	db, open := live(t, src)
@@ -51,7 +51,7 @@ func TestStageCopiesExactlyWhatIsCommitted(t *testing.T) {
 		t.Fatal("the test wants the commits to be in the log")
 	}
 	dst := filepath.Join(dir, "staged", "copy.db")
-	if err := Stage(src, dst); err != nil {
+	if err := Backup(src, dst); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := Rows(dst)
@@ -62,18 +62,18 @@ func TestStageCopiesExactlyWhatIsCommitted(t *testing.T) {
 		t.Fatal(err)
 	}
 	open.Rollback()
-	if err := Stage(src, dst); err != nil { // a second run replaces the copy
+	if err := Backup(src, dst); err != nil { // a second run replaces the copy
 		t.Fatal(err)
 	}
 }
 
-func TestStageLeavesNothingBehindWhenItFails(t *testing.T) {
+func TestBackupLeavesNothingBehindWhenItFails(t *testing.T) {
 	dir := t.TempDir()
 	notDB := filepath.Join(dir, "broken.db")
 	os.WriteFile(notDB, []byte(strings.Repeat("this only has the name of a database ", 300)), 0o644)
 	dest := filepath.Join(dir, "staged")
 	for _, src := range []string{notDB, filepath.Join(dir, "missing.db")} {
-		if err := Stage(src, filepath.Join(dest, "copy.db")); err == nil {
+		if err := Backup(src, filepath.Join(dest, "copy.db")); err == nil {
 			t.Fatalf("staging %s must fail", src)
 		}
 	}
@@ -85,7 +85,7 @@ func TestStageLeavesNothingBehindWhenItFails(t *testing.T) {
 		t.Fatalf("the header check said %v", err)
 	}
 	if !strings.Contains(durable.TempMark, "tmp") {
-		t.Fatal("staging uses the mark SweepTemp knows")
+		t.Fatal("staging uses the mark RemoveTempFiles knows")
 	}
 }
 

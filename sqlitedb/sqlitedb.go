@@ -7,7 +7,7 @@
 //
 // Why a copy needs this: in WAL mode the newest commits are in the -wal file, not in the main file. A plain
 // file copy opens, passes its integrity check, and lacks them. SQLite's backup API reads one consistent
-// snapshot instead, and that is what Stage uses.
+// snapshot instead, and that is what Backup uses.
 package sqlitedb
 
 import (
@@ -67,9 +67,9 @@ func LogBytes(path string) int64 {
 	return info.Size()
 }
 
-// Stage writes a consistent copy of the live database src to dst. The copy holds every committed change and
+// Backup writes a consistent copy of the live database src to dst, with SQLite's online backup API. The copy holds every committed change and
 // nothing uncommitted, is checked, synced, and only then given its name: a failed copy leaves no file.
-func Stage(src, dst string) error {
+func Backup(src, dst string) error {
 	if _, err := JournalMode(src); err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func Stage(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	tmp := dst + durable.TempMark + "stage"
+	tmp := dst + durable.TempMark + "backup"
 	os.Remove(tmp)
 	done := false
 	defer func() {
@@ -142,7 +142,7 @@ func QuickCheck(path string) error {
 	return check(path, "quick_check")
 }
 
-// IntegrityCheck is the thorough check: slower, and what a rehearsed restore should pass.
+// IntegrityCheck is the thorough check: slower, and what a restore test should pass.
 func IntegrityCheck(path string) error {
 	return check(path, "integrity_check")
 }
@@ -189,7 +189,7 @@ func Checkpoint(path string) error {
 	return nil
 }
 
-// Rows counts the rows of every table: what a rehearsed restore compares with the live database.
+// Rows counts the rows of every table: what a restore test compares with the live database.
 func Rows(path string) (map[string]int64, error) {
 	u, err := uri(path, "mode=ro")
 	if err != nil {

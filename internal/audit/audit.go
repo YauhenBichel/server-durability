@@ -1,10 +1,9 @@
 // Copyright 2026 Yauhen Bichel
 // SPDX-License-Identifier: Apache-2.0
 
-// Package audit looks at a machine the way its declaration describes it and says, store by store, what
-// would be lost and when: a store on a file system that forgets, a backup on the same disk as the data, a
-// snapshot that does not hold what it is believed to hold, a restore nobody has tried, a service that will
-// not come back after a restart. It reads and never changes anything.
+// Package audit checks a machine against its config file and reports, item by item, what could be lost:
+// data on a RAM disk, a backup on the same disk as the data, a snapshot that is missing data, a backup that
+// was never restore-tested, a service that will not start after a reboot. It only reads.
 package audit
 
 import (
@@ -25,21 +24,21 @@ import (
 
 // Levels of a finding, worst first.
 const (
-	Fail = "fail" // data or work would be lost
-	Warn = "warn" // it holds today and depends on luck
-	OK   = "ok"
-	Note = "note" // could not be checked here, or worth knowing
+	Error   = "error"   // data or work would be lost
+	Warning = "warning" // works today, but is a risk
+	OK      = "ok"
+	Info    = "info" // could not be checked here, or good to know
 )
 
-// Finding is one line of the audit.
+// Finding is one line of the report.
 type Finding struct {
 	Level   string `json:"level"`
-	Subject string `json:"subject"` // a store's name, "backup", "restore", a unit
+	Subject string `json:"subject"` // a data entry's name, "backup", "restore test", a unit
 	Message string `json:"message"`
 	Fix     string `json:"fix,omitempty"`
 }
 
-// Env is everything outside the declaration that the audit reads. Tests give their own.
+// Env is everything outside the config file that the checks read. Tests pass their own.
 type Env struct {
 	ProcRoot string // "/proc"
 	SysRoot  string // "/sys"
@@ -48,16 +47,16 @@ type Env struct {
 	Tool     backup.Tool
 }
 
-// DrillResult is what a rehearsed restore leaves in the state directory.
-type DrillResult struct {
-	Time    time.Time    `json:"time"`
-	OK      bool         `json:"ok"`
-	Seconds float64      `json:"seconds"`
-	Stores  []DrillStore `json:"stores"`
+// RestoreTest is the report a restore test saves in the state directory.
+type RestoreTest struct {
+	Time    time.Time         `json:"time"`
+	OK      bool              `json:"ok"`
+	Seconds float64           `json:"seconds"`
+	Items   []RestoreTestItem `json:"items"`
 }
 
-// DrillStore is one store of a rehearsed restore.
-type DrillStore struct {
+// RestoreTestItem is one data entry of a restore test.
+type RestoreTestItem struct {
 	Name     string           `json:"name"`
 	OK       bool             `json:"ok"`
 	Message  string           `json:"message"`
@@ -65,8 +64,8 @@ type DrillStore struct {
 	Live     map[string]int64 `json:"live_rows,omitempty"`
 }
 
-// DrillFile is where the last rehearsal's result is kept.
-func DrillFile(c *config.Config) string { return filepath.Join(c.StateDir, "drill.json") }
+// RestoreTestFile is where the last restore test's report is saved.
+func RestoreTestFile(c *config.Config) string { return filepath.Join(c.StateDir, "restore-test.json") }
 
 type mount struct {
 	point, fstype, options, dev string
@@ -104,7 +103,7 @@ func mountOf(all []mount, path string) (mount, bool) {
 	return best, found
 }
 
-// disks names the physical disks under a block device, through partitions and device-mapper layers.
+// disks returns the physical disks under a block device, through partitions and device-mapper (LVM) layers.
 func disks(sysRoot, dev string, depth int) []string {
 	if depth > 8 {
 		return nil
@@ -166,7 +165,7 @@ func age(d time.Duration) string {
 	}
 }
 
-// Run audits the machine against its declaration.
+// Run checks the machine against its config file.
 func Run(ctx context.Context, c *config.Config, env Env) []Finding {
 	var out []Finding
 	add := func(level, subject, message, fix string) {
@@ -175,7 +174,7 @@ func Run(ctx context.Context, c *config.Config, env Env) []Finding {
 	now := env.Now()
 	all, mountErr := mounts(env.ProcRoot)
 	if mountErr != nil {
-		add(Note, "machine", "file systems and disks are not checked on this system (no "+env.ProcRoot+"/self/mountinfo)", "")
+		add(Info, "machine", "file system and disk checks are skipped on this system (no "+env.ProcRoot+"/self/mountinfo)", "")
 	}
 	var repoDisks []string
 	localRepo := c.Backup.Repository != "" && filepath.IsAbs(c.Backup.Repository)
@@ -185,34 +184,34 @@ func Run(ctx context.Context, c *config.Config, env Env) []Finding {
 		}
 	}
 
-	// ---- each store: is it there, how is it kept, what is under it ----
+	// ---- each data entry: does it exist, what kind is it, what is it stored on ----
 	present := map[string]bool{}
-	var sameDisk []string // stores that share a disk with the backup repository
+	var sameDisk []string // entries on the same disk as the backup repository
 	sharedDisk := ""
-	volatile := map[string][]string{} // disk -> stores on it, for disks with a volatile write cache
-	for _, s := range c.Stores {
+	volatile := map[string][]string{} // disk -> entries on it, for disks with a volatile write cache
+	for _, s := range c.Data {
 		info, err := os.Stat(s.Path)
 		if err != nil {
-			add(Fail, s.Name, "the store is not there: "+s.Path, "correct the path in the declaration, or remove the store from it")
+			add(Error, s.Name, "path not found: "+s.Path, "fix the path in the config file, or remove this entry")
 			continue
 		}
 		present[s.Name] = true
 		if s.Kind == "directory" != info.IsDir() {
-			add(Warn, s.Name, fmt.Sprintf("declared as %s, but %s is %s", s.Kind, s.Path, map[bool]string{true: "a directory", false: "a file"}[info.IsDir()]), "correct `kind` in the declaration")
+			add(Warning, s.Name, fmt.Sprintf("the config says kind = %q, but %s is %s", s.Kind, s.Path, map[bool]string{true: "a directory", false: "a file"}[info.IsDir()]), "fix `kind` in the config file")
 		}
 		if s.Kind == "sqlite" {
 			mode, err := sqlitedb.JournalMode(s.Path)
 			switch {
 			case err != nil:
-				add(Fail, s.Name, err.Error(), "")
+				add(Error, s.Name, err.Error(), "")
 			case mode == "wal":
 				if log := sqlitedb.LogBytes(s.Path); log > 256<<20 {
-					add(Warn, s.Name, fmt.Sprintf("its write-ahead log is %d MB: commits are piling up outside the main file", log>>20), "let its service checkpoint, or checkpoint it while the service is stopped")
+					add(Warning, s.Name, fmt.Sprintf("its WAL file is %d MB: changes are not being checkpointed into the main database file", log>>20), "let the service run a checkpoint, or run one while the service is stopped")
 				} else {
-					add(OK, s.Name, "a SQLite database in WAL mode", "")
+					add(OK, s.Name, "SQLite database, WAL mode", "")
 				}
 			default:
-				add(OK, s.Name, "a SQLite database with a rollback journal", "")
+				add(OK, s.Name, "SQLite database, rollback journal mode", "")
 			}
 		}
 		if mountErr != nil {
@@ -224,9 +223,9 @@ func Run(ctx context.Context, c *config.Config, env Env) []Finding {
 		}
 		switch {
 		case m.fstype == "tmpfs" || m.fstype == "ramfs" || m.fstype == "devtmpfs":
-			add(Fail, s.Name, "it is on "+m.fstype+" ("+m.point+"): memory, gone at the next restart", "move the store to a disk")
+			add(Error, s.Name, "stored on "+m.fstype+" ("+m.point+"): this is RAM, the data is lost on reboot", "move it to a disk")
 		case strings.Contains(m.options, "data=writeback") || strings.Contains(m.options, "nobarrier") || strings.Contains(m.options, "barrier=0"):
-			add(Warn, s.Name, "its file system ("+m.fstype+" at "+m.point+") is mounted without the protections that make a power cut safe", "remove data=writeback / nobarrier from the mount options")
+			add(Warning, s.Name, "its file system ("+m.fstype+" at "+m.point+") is mounted with unsafe options: a power loss can corrupt data", "remove data=writeback / nobarrier from the mount options")
 		}
 		under := disks(env.SysRoot, m.dev, 0)
 		if d := shared(under, repoDisks); d != "" {
@@ -239,99 +238,95 @@ func Run(ctx context.Context, c *config.Config, env Env) []Finding {
 		}
 	}
 	for _, d := range sortedKeys(volatile) {
-		add(Note, "disk "+d, "a volatile write cache under "+strings.Join(volatile[d], ", ")+": what is not synced is lost in a power cut. Synced writes are safe as long as the drive honours flushes", "")
+		add(Info, "disk "+d, "has a volatile write cache (used by: "+strings.Join(volatile[d], ", ")+"): data that was not fsynced is lost on power loss. Fsynced data is safe if the drive honours flush commands", "")
 	}
-	var elsewhere []string // declared copies of the repository that are not on its disk
-	for _, cp := range c.Copies {
-		if cp.Where != "same-disk" {
+	var elsewhere []string // configured backup copies that are not on the repository's disk
+	for _, cp := range c.BackupCopies {
+		if cp.Location != "same-disk" {
 			elsewhere = append(elsewhere, cp.Name)
 		}
 	}
 	if len(sameDisk) > 0 {
-		what := "the repository is on the same disk (" + sharedDisk + ") as " + strings.Join(sameDisk, ", ")
+		what := "the backup repository is on the same disk (" + sharedDisk + ") as the data (" + strings.Join(sameDisk, ", ") + ")"
 		if len(elsewhere) == 0 {
-			add(Fail, "backup", what+": when that disk dies, the data and its only backup die together", "keep a copy of the repository on another disk or another machine, and declare it as a [[copy]]")
+			add(Error, "backup", what+": if this disk fails, the data and its only backup are both lost", "keep a copy of the backup on another disk or another machine and add it as a [[backup_copy]]")
 		} else {
-			add(Warn, "backup", what+": when that disk dies, what remains is the declared copy ("+strings.Join(elsewhere, ", ")+"), as fresh as its last sync", "put the repository itself on another disk, or check how often the copy is refreshed")
+			add(Warning, "backup", what+": if this disk fails, only the other backup copy ("+strings.Join(elsewhere, ", ")+") is left, as old as its last sync", "move the backup repository to another disk, or sync the other copy more often")
 		}
 	}
 
-	// ---- the backup: is there one, how old, does it hold every store, where else is it ----
+	// ---- the backup: is there one, how old is it, does it contain all data, where are its copies ----
 	if env.Tool == nil {
-		add(Fail, "backup", "no backup is declared", "add a [backup] section; `server-durability init` shows one")
+		add(Error, "backup", "no backup is configured", "add a [backup] section; `server-durability init` prints an example")
 	} else {
 		snap, err := env.Tool.Latest(ctx)
 		switch {
 		case errors.Is(err, backup.ErrNoSnapshot):
-			add(Fail, "backup", "the repository holds no snapshot", "run the backup once")
+			add(Error, "backup", "the backup repository has no snapshots", "run the backup once")
 		case err != nil:
-			add(Fail, "backup", "the newest snapshot cannot be read: "+err.Error(), "")
+			add(Error, "backup", "cannot read the latest snapshot: "+err.Error(), "")
 		default:
 			old := now.Sub(snap.Time)
 			if old > time.Duration(c.Backup.MaxAgeHours)*time.Hour {
-				add(Fail, "backup", fmt.Sprintf("the newest snapshot (%s) is %s old; the declaration allows %d hours", snap.ID, age(old), c.Backup.MaxAgeHours), "look at why the backup stopped running")
+				add(Error, "backup", fmt.Sprintf("the latest snapshot (%s) is %s old; the config allows %d hours", snap.ID, age(old), c.Backup.MaxAgeHours), "find out why the backup stopped running")
 			} else {
-				add(OK, "backup", fmt.Sprintf("the newest snapshot (%s) is %s old", snap.ID, age(old)), "")
+				add(OK, "backup", fmt.Sprintf("the latest snapshot (%s) is %s old", snap.ID, age(old)), "")
 			}
-			out = append(out, Covers(ctx, c, env.Tool, present)...)
+			out = append(out, Verify(ctx, c, env.Tool, present)...)
 		}
-		offsite, others := 0, 0
-		for _, cp := range c.Copies {
-			if cp.Where == "off-site" {
+		offsite := 0
+		for _, cp := range c.BackupCopies {
+			if cp.Location == "off-site" {
 				offsite++
-			}
-			if cp.Where != "same-disk" {
-				others++
 			}
 		}
 		switch {
-		case others == 0 && len(sameDisk) > 0:
-			// already said, and worse: the only copy shares a disk with the data
-		case others == 0:
-			add(Warn, "backup", "the repository is declared as the only copy", "copy the repository to another machine and declare it as a [[copy]]")
+		case len(elsewhere) == 0 && len(sameDisk) > 0:
+			// already reported above, as an error: the only copy is on the data's disk
+		case len(elsewhere) == 0:
+			add(Warning, "backup", "the backup repository is the only copy", "copy the repository to another machine and add it as a [[backup_copy]]")
 		case offsite == 0:
-			add(Warn, "backup", "every copy of the repository is in one place: a fire or a theft takes them all", "keep one copy off-site and declare it with where = \"off-site\"")
+			add(Warning, "backup", "there is no off-site backup copy: a fire or theft would destroy all copies", "keep one copy off-site and add it with location = \"off-site\"")
 		default:
-			add(OK, "backup", fmt.Sprintf("%d other copies of the repository are declared, %d of them off-site", others, offsite), "")
+			add(OK, "backup", fmt.Sprintf("%d other backup copies are configured, %d off-site", len(elsewhere), offsite), "")
 		}
 	}
 
-	// ---- staging: are live databases copied consistently ----
+	// ---- database copies: are live databases backed up from a consistent copy ----
 	var plain []string
-	for _, s := range c.Stores {
+	for _, s := range c.Data {
 		if s.Kind != "sqlite" || !present[s.Name] || env.Tool == nil {
 			continue
 		}
-		if c.Stage.Dir == "" {
+		if c.DBCopies.Dir == "" {
 			plain = append(plain, s.Name)
 			continue
 		}
 		info, err := os.Stat(c.SnapshotPath(s))
 		switch {
 		case err != nil:
-			add(Warn, s.Name, "no staged copy yet in "+c.Stage.Dir, "run `server-durability stage` before each backup")
+			add(Warning, s.Name, "no database copy yet in "+c.DBCopies.Dir, "run `server-durability copy-db` before each backup")
 		case now.Sub(info.ModTime()) > time.Duration(c.Backup.MaxAgeHours)*time.Hour:
-			add(Warn, s.Name, "its staged copy is "+age(now.Sub(info.ModTime()))+" old: staging is not running before the backup", "run `server-durability stage` before each backup")
+			add(Warning, s.Name, "its database copy is "+age(now.Sub(info.ModTime()))+" old: copy-db is not running before the backup", "run `server-durability copy-db` before each backup")
 		}
 	}
-
 	if len(plain) > 0 {
-		add(Warn, "backup", "live databases are copied as plain files ("+strings.Join(plain, ", ")+"): such a copy can open, pass its check and lack the newest commits", "declare a [stage] directory inside the backup's paths and run `server-durability stage` before each backup")
+		add(Warning, "backup", "live SQLite databases are backed up as plain files ("+strings.Join(plain, ", ")+"): such a copy can open, pass the integrity check and still miss the latest commits", "set [db_copies] dir inside the backed-up paths and run `server-durability copy-db` before each backup")
 	}
 
-	// ---- a restore that has been tried ----
+	// ---- has a restore ever been tested ----
 	if env.Tool != nil {
-		var last DrillResult
-		raw, err := os.ReadFile(DrillFile(c))
+		var last RestoreTest
+		raw, err := os.ReadFile(RestoreTestFile(c))
 		switch {
 		case err != nil || json.Unmarshal(raw, &last) != nil:
-			add(Warn, "restore", "a restore has never been rehearsed here: the backup is a hope until one is", "run `server-durability drill`")
+			add(Warning, "restore test", "the backup has never been restore-tested: an untested backup may not work", "run `server-durability restore-test`")
 		case !last.OK:
-			add(Fail, "restore", "the last rehearsed restore, "+age(now.Sub(last.Time))+" ago, failed", "run `server-durability drill` and read what it says")
-		case now.Sub(last.Time) > time.Duration(c.Drill.MaxAgeDays)*24*time.Hour:
-			add(Warn, "restore", fmt.Sprintf("the last rehearsed restore was %s ago; the declaration allows %d days", age(now.Sub(last.Time)), c.Drill.MaxAgeDays), "run `server-durability drill`, or put it on a monthly timer")
+			add(Error, "restore test", "the last restore test ("+age(now.Sub(last.Time))+" ago) failed", "run `server-durability restore-test` and read its output")
+		case now.Sub(last.Time) > time.Duration(c.RestoreTest.MaxAgeDays)*24*time.Hour:
+			add(Warning, "restore test", fmt.Sprintf("the last restore test was %s ago; the config allows %d days", age(now.Sub(last.Time)), c.RestoreTest.MaxAgeDays), "run `server-durability restore-test`, or schedule it monthly")
 		default:
-			add(OK, "restore", "a restore was rehearsed "+age(now.Sub(last.Time))+" ago and every store opened", "")
+			add(OK, "restore test", "last restore test: "+age(now.Sub(last.Time))+" ago, all data restored and opened", "")
 		}
 	}
 
@@ -339,54 +334,56 @@ func Run(ctx context.Context, c *config.Config, env Env) []Finding {
 	return out
 }
 
-// Covers asks the newest snapshot whether every declared store is in it. `present` limits the question to
-// stores that exist; nil asks about all of them.
-func Covers(ctx context.Context, c *config.Config, tool backup.Tool, present map[string]bool) []Finding {
+// Verify checks that every configured data entry is in the latest snapshot. `present` limits the check to
+// entries that exist; nil checks all of them.
+func Verify(ctx context.Context, c *config.Config, tool backup.Tool, present map[string]bool) []Finding {
 	paths, err := tool.Paths(ctx)
 	if err != nil {
-		return []Finding{{Level: Fail, Subject: "backup", Message: "the newest snapshot cannot be listed: " + err.Error()}}
+		return []Finding{{Level: Error, Subject: "backup", Message: "cannot list the latest snapshot: " + err.Error()}}
 	}
 	var out []Finding
-	for _, s := range c.Stores {
+	for _, s := range c.Data {
 		if present != nil && !present[s.Name] {
 			continue
 		}
 		want := c.SnapshotPath(s)
 		real, _ := filepath.EvalSymlinks(want)
 		if paths[want] || (real != "" && paths[real]) {
-			out = append(out, Finding{Level: OK, Subject: s.Name, Message: "in the newest snapshot: " + want})
+			out = append(out, Finding{Level: OK, Subject: s.Name, Message: "in the latest snapshot: " + want})
 			continue
 		}
-		out = append(out, Finding{Level: Fail, Subject: s.Name, Message: "not in the newest snapshot: " + want,
-			Fix: "add this path to what the backup takes"})
+		out = append(out, Finding{Level: Error, Subject: s.Name, Message: "missing from the latest snapshot: " + want,
+			Fix: "add this path to the backup job"})
 	}
 	return out
 }
 
-// services checks what must come back after a restart: declared workers, long-running transient units,
+// services checks what must start again after a reboot: configured services, long-running transient units,
 // and calendar timers that skip a run when the machine was off.
 func services(ctx context.Context, c *config.Config, env Env) []Finding {
 	var out []Finding
 	if _, err := env.Run(ctx, "systemctl", "--version"); err != nil {
-		if len(c.Workers) > 0 {
-			out = append(out, Finding{Level: Note, Subject: "services", Message: "systemd is not here: workers are not checked"})
+		if len(c.Services) > 0 {
+			out = append(out, Finding{Level: Info, Subject: "services", Message: "systemd not found: services are not checked"})
 		}
 		return out
 	}
-	for _, w := range c.Workers {
+	for _, w := range c.Services {
 		args := []string{"is-enabled", w.Unit}
+		enable := "systemctl enable " + w.Unit
 		if w.User {
 			args = append([]string{"--user"}, args...)
+			enable = "systemctl --user enable " + w.Unit
 		}
 		state, _ := env.Run(ctx, "systemctl", args...)
 		state = strings.TrimSpace(state)
 		switch state {
 		case "enabled", "enabled-runtime", "static", "alias", "indirect", "generated":
-			out = append(out, Finding{Level: OK, Subject: w.Unit, Message: "starts by itself after a restart (" + state + ")"})
+			out = append(out, Finding{Level: OK, Subject: w.Unit, Message: "starts automatically after a reboot (" + state + ")"})
 		case "":
-			out = append(out, Finding{Level: Fail, Subject: w.Unit, Message: "systemd does not know this unit", Fix: "correct the unit's name in the declaration"})
+			out = append(out, Finding{Level: Error, Subject: w.Unit, Message: "systemd does not know this unit", Fix: "fix the unit name in the config file"})
 		default:
-			out = append(out, Finding{Level: Fail, Subject: w.Unit, Message: "does not start after a restart (" + state + ")", Fix: "systemctl enable it"})
+			out = append(out, Finding{Level: Error, Subject: w.Unit, Message: "is not enabled (" + state + "): it will not start after a reboot", Fix: "run: " + enable})
 		}
 	}
 	for _, scope := range [][]string{{"--user"}, {}} {
@@ -402,18 +399,18 @@ func services(ctx context.Context, c *config.Config, env Env) []Finding {
 				if err == nil && env.Now().Sub(started) < time.Hour {
 					continue
 				}
-				out = append(out, Finding{Level: Warn, Subject: p["Id"], Message: "a transient " + who + " unit that has been running for over an hour: it will not exist after a restart",
-					Fix: "give long work a unit file that is enabled until the work is done"})
+				out = append(out, Finding{Level: Warning, Subject: p["Id"], Message: "a transient " + who + " unit (started with systemd-run) running for over an hour: it will not exist after a reboot",
+					Fix: "run long jobs from an enabled unit file"})
 			}
 		}
 		timers, err := env.Run(ctx, "systemctl", append(append([]string{}, scope...), "show", "--type=timer", "-p", "Id", "-p", "Persistent", "-p", "TimersCalendar", "-p", "UnitFileState", "*")...)
-		if err != nil || len(scope) == 0 { // the system's own timers are the distribution's business
+		if err != nil || len(scope) == 0 { // the system's own timers belong to the distribution
 			continue
 		}
 		for _, block := range strings.Split(timers, "\n\n") {
 			p := props(block)
 			if p["TimersCalendar"] != "" && p["Persistent"] == "no" && p["UnitFileState"] == "enabled" {
-				out = append(out, Finding{Level: Warn, Subject: p["Id"], Message: "a calendar timer without Persistent=true: a run that falls while the machine is off is skipped",
+				out = append(out, Finding{Level: Warning, Subject: p["Id"], Message: "calendar timer without Persistent=true: a run missed while the machine was off is skipped",
 					Fix: "add Persistent=true to its [Timer] section"})
 			}
 		}
@@ -431,9 +428,9 @@ func props(block string) map[string]string {
 	return out
 }
 
-// Worst is the gravest level among findings.
+// Worst is the most severe level among findings.
 func Worst(findings []Finding) string {
-	rank := map[string]int{Fail: 3, Warn: 2, Note: 1, OK: 0}
+	rank := map[string]int{Error: 3, Warning: 2, Info: 1, OK: 0}
 	worst := OK
 	for _, f := range findings {
 		if rank[f.Level] > rank[worst] {
