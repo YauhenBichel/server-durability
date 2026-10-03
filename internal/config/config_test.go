@@ -31,8 +31,19 @@ func TestTheExampleLoadsAndPathsAreExpanded(t *testing.T) {
 	if c.SnapshotPath(c.Data[0]) != filepath.Join(home, "backups/sqlite/app.db") || c.SnapshotPath(c.Data[1]) != c.Data[1].Path {
 		t.Fatalf("a database is looked for as its consistent copy, a directory as itself: %s", c.SnapshotPath(c.Data[0]))
 	}
+	if !strings.HasPrefix(c.Backup.PasswordFile, home) {
+		t.Fatalf("~ in password_file is not expanded: %s", c.Backup.PasswordFile)
+	}
 	if c.Backup.MaxAgeHours != 30 || c.RestoreTest.MaxAgeDays != 35 || len(c.BackupCopies) != 1 || !c.Services[0].User {
 		t.Fatalf("defaults and lists: %+v", c)
+	}
+}
+
+func TestTildeInTheBackupBinaryIsExpanded(t *testing.T) {
+	c, err := Load(write(t, "[[data]]\nname = \"a\"\npath = \"/x\"\n[backup]\ntool = \"restic\"\nrepository = \"/r\"\nbinary = \"~/.local/bin/restic\"\n"))
+	home, _ := os.UserHomeDir()
+	if err != nil || c.Backup.Binary != filepath.Join(home, ".local/bin/restic") {
+		t.Fatalf("binary = %q, %v", c.Backup.Binary, err)
 	}
 }
 
