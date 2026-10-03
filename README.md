@@ -109,13 +109,34 @@ machine in a temporary directory and produces the two audits above.
 
 ## Commands
 
-| Command | Does | Writes |
+| Command | What it does | What it leaves on the disk |
 |---|---|---|
-| `audit` | every check below; exit 1 when something would be lost (`-strict`: also on a warning) | nothing |
-| `stage` | a consistent copy of each live SQLite database into the stage directory, by SQLite's backup API, checked and synced before it gets its name | the copies |
-| `covers` | asks the newest snapshot whether every declared store is in it | nothing |
-| `drill` | rehearses a restore: every store out of the newest snapshot into a scratch directory, databases opened and checked, row counts beside the live ones | the result, with its date |
-| `init` | prints an example declaration | nothing |
+| `audit` | Looks at everything in the list below and prints one line a finding. Exit 1 when something would be lost (`-strict`: also on a warning) | nothing |
+| `stage` | Makes a safe copy of each live SQLite database in the stage directory, so the backup takes that copy and not the file the service is writing to | the copies |
+| `covers` | Asks the newest backup: is every store I declared really in you? | nothing |
+| `drill` | **Tests the backup by restoring from it.** See below | a small report with the date |
+| `init` | Prints an example declaration | nothing |
+
+### `drill`: a test restore
+
+A backup you have never restored from is only a hope. `drill` tries it for you, without touching the real data:
+
+1. It takes the newest backup and restores every declared store into a **temporary folder**, never over the
+   real files.
+2. It opens each restored database and runs SQLite's integrity check, to see that it is not damaged.
+3. It counts the rows in the restored database and prints that number next to the number in the real one,
+   so you can see how much the backup holds ("restored 1000 rows, the live one has 1000 now").
+4. It deletes the temporary folder.
+5. It saves a short report (the date, each store, whether it worked). `audit` reads that report and warns
+   when the last test is old, or failed.
+
+```console
+$ server-durability drill
+ok    orders         restored, sound, 1 tables, 1000 rows (the live one has 1000 now)
+ok    uploads        restored, 1 entries at its top
+
+the rehearsal took 2.1 s; recorded in /srv/state/drill.json
+```
 
 All take `-json`. Exit status: 0 in order, 1 something would be lost or a step failed, 2 the command line was
 wrong, 3 the declaration could not be read.
@@ -126,7 +147,7 @@ A backup script then reads:
 server-durability stage && restic backup ~/backups/sqlite ~/app/uploads && server-durability covers
 ```
 
-and a monthly timer runs `server-durability drill`.
+and a monthly timer runs `server-durability drill`, the test restore.
 
 ## What the audit checks
 
