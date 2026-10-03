@@ -45,7 +45,7 @@ OK    uploads        in the latest snapshot: /srv/app/uploads
 
 $ server-durability restore-test
 OK    orders         restored, integrity check ok, 1 table, 1000 rows (live database: 1000 rows)
-OK    uploads        restored, 1 file or directory at the top level
+OK    uploads        restored, 1 entry at the top level
 
 restore test took 2.1 s; report saved to /srv/state/restore-test.json
 
@@ -138,7 +138,7 @@ A backup that was never restored may not work. `restore-test` tries it, without 
 ```console
 $ server-durability restore-test
 OK    orders         restored, integrity check ok, 1 table, 1000 rows (live database: 1000 rows)
-OK    uploads        restored, 1 file or directory at the top level
+OK    uploads        restored, 1 entry at the top level
 
 restore test took 2.1 s; report saved to /srv/state/restore-test.json
 ```

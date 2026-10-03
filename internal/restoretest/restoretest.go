@@ -110,7 +110,7 @@ func Run(ctx context.Context, c *config.Config, tool backup.Tool, now time.Time)
 			if !info.IsDir() || (len(entries) == 0 && len(live) > 0) {
 				one.Message = "the restored directory is empty but the live one is not"
 			} else {
-				one.OK, one.Message = true, "restored, "+count(len(entries), "file or directory")+" at the top level"
+				one.OK, one.Message = true, "restored, "+count(len(entries), "entry")+" at the top level"
 			}
 		default:
 			live, liveErr := os.Stat(s.Path)
