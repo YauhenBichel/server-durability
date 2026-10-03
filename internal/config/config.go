@@ -145,6 +145,7 @@ func Load(path string) (*Config, error) {
 	c.DBCopies.Dir = Expand(c.DBCopies.Dir)
 	c.Backup.Repository = Expand(c.Backup.Repository)
 	c.Backup.PasswordFile = Expand(c.Backup.PasswordFile)
+	c.Backup.Binary = Expand(c.Backup.Binary)
 	if c.Backup.Tool != "" && c.Backup.Tool != "restic" {
 		problems = append(problems, fmt.Sprintf("backup tool %q is not supported yet: restic is", c.Backup.Tool))
 	}

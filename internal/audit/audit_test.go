@@ -160,7 +160,7 @@ func TestEveryWayToLoseDataIsNamed(t *testing.T) {
 		case strings.HasPrefix(a, "--user show --type=service"):
 			return "Id=run-u42.service\nUnitFileState=transient\nActiveEnterTimestamp=Sat 2026-10-03 05:00:00 UTC\n\nId=fresh.service\nUnitFileState=transient\nActiveEnterTimestamp=Sat 2026-10-03 11:50:00 UTC\n\nId=app.service\nUnitFileState=disabled\nActiveEnterTimestamp=Sat 2026-10-03 05:00:00 UTC\n", nil
 		case strings.HasPrefix(a, "--user show --type=timer"):
-			return "Id=nightly.timer\nPersistent=no\nTimersCalendar={ OnCalendar=*-*-* 03:00:00 ; next_elapse=n/a }\nUnitFileState=enabled\n\nId=often.timer\nPersistent=no\nTimersCalendar=\nUnitFileState=enabled\n", nil
+			return "Id=nightly.timer\nPersistent=no\nTimersCalendar={ OnCalendar=*-*-* 03:00:00 ; next_elapse=n/a }\nUnitFileState=enabled\n\nId=often.timer\nPersistent=no\nTimersCalendar=\nUnitFileState=enabled\n\nId=quarter-hour.timer\nPersistent=no\nTimersCalendar={ OnCalendar=*-*-* *:00/15:00 ; next_elapse=n/a }\nUnitFileState=enabled\n", nil
 		}
 		return "", nil
 	}
@@ -185,7 +185,7 @@ func TestEveryWayToLoseDataIsNamed(t *testing.T) {
 		"run-u42.service: a transient user unit",
 		"nightly.timer: calendar timer without Persistent=true")
 	for _, l := range append(lines(got, Warning), lines(got, Error)...) {
-		if strings.Contains(l, "fresh.service") || strings.Contains(l, "often.timer") || strings.HasPrefix(l, "gone: missing from the latest") {
+		if strings.Contains(l, "fresh.service") || strings.Contains(l, "often.timer") || strings.Contains(l, "quarter-hour.timer") || strings.HasPrefix(l, "gone: missing from the latest") {
 			t.Errorf("should not be reported: %s", l)
 		}
 	}

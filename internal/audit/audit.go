@@ -409,13 +409,30 @@ func services(ctx context.Context, c *config.Config, env Env) []Finding {
 		}
 		for _, block := range strings.Split(timers, "\n\n") {
 			p := props(block)
-			if p["TimersCalendar"] != "" && p["Persistent"] == "no" && p["UnitFileState"] == "enabled" {
+			if p["TimersCalendar"] != "" && p["Persistent"] == "no" && p["UnitFileState"] == "enabled" && !severalTimesADay(p["TimersCalendar"]) {
 				out = append(out, Finding{Level: Warning, Subject: p["Id"], Message: "calendar timer without Persistent=true: a run missed while the machine was off is skipped",
 					Fix: "add Persistent=true to its [Timer] section"})
 			}
 		}
 	}
 	return out
+}
+
+// severalTimesADay reports whether a calendar timer runs more than once a day (any hour, or a list or a step
+// of hours). Such a timer loses little when one run is missed, so Persistent=true is not worth a warning.
+// The value is systemd's own form: "{ OnCalendar=*-*-* *:00/15:00 ; next_elapse=... }".
+func severalTimesADay(timersCalendar string) bool {
+	_, spec, ok := strings.Cut(timersCalendar, "OnCalendar=")
+	if !ok {
+		return false
+	}
+	spec, _, _ = strings.Cut(spec, ";")
+	fields := strings.Fields(spec)
+	if len(fields) == 0 {
+		return false
+	}
+	hour, _, isTime := strings.Cut(fields[len(fields)-1], ":")
+	return isTime && strings.ContainsAny(hour, "*/,.")
 }
 
 func props(block string) map[string]string {
