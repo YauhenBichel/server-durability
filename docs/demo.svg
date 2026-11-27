@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="787" height="586" viewBox="0 0 787 586" role="img" aria-label="server-durability check before and after the fixes: one error, then a clean report">
+<rect width="787" height="586" rx="10" fill="#0d1117" stroke="#30363d"/>
+<circle cx="20" cy="16" r="5" fill="#ff5f56"/><circle cx="38" cy="16" r="5" fill="#ffbd2e"/><circle cx="56" cy="16" r="5" fill="#27c93f"/>
+<g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" xml:space="preserve">
+<text x="20" y="57" xml:space="preserve"><tspan fill="#8b949e">$</tspan><tspan fill="#ffffff" font-weight="bold"> server-durability check</tspan></text>
+<text x="20" y="75" xml:space="preserve"><tspan fill="#ff7b72" font-weight="bold">ERROR</tspan> orders         missing from the latest snapshot: /srv/db-copies/orders.db</text>
+<text x="20" y="93" xml:space="preserve"><tspan fill="#8b949e">                     fix: add this path to the backup job</tspan></text>
+<text x="20" y="111" xml:space="preserve"><tspan fill="#e3b341" font-weight="bold">WARN</tspan>  backup         the backup repository is the only copy</text>
+<text x="20" y="129" xml:space="preserve"><tspan fill="#8b949e">                     fix: copy the repository to another machine and add it as a [[backup_copy]]</tspan></text>
+<text x="20" y="147" xml:space="preserve"><tspan fill="#e3b341" font-weight="bold">WARN</tspan>  orders         no database copy yet in /srv/db-copies</text>
+<text x="20" y="165" xml:space="preserve"><tspan fill="#8b949e">                     fix: run `server-durability copy-db` before each backup</tspan></text>
+<text x="20" y="183" xml:space="preserve"><tspan fill="#e3b341" font-weight="bold">WARN</tspan>  restore test   the backup has never been restore-tested: an untested backup may not work</text>
+<text x="20" y="201" xml:space="preserve"><tspan fill="#8b949e">                     fix: run `server-durability restore-test`</tspan></text>
+<text x="20" y="219" xml:space="preserve"><tspan fill="#79c0ff" font-weight="bold">INFO</tspan>  machine        file system and disk checks are skipped on this system (no /proc/self/mountinfo)</text>
+<text x="20" y="237" xml:space="preserve"><tspan fill="#56d364" font-weight="bold">OK</tspan>    orders         SQLite database, WAL mode</text>
+<text x="20" y="255" xml:space="preserve"><tspan fill="#56d364" font-weight="bold">OK</tspan>    backup         the latest snapshot (5643a42f) is 0 minutes old</text>
+<text x="20" y="273" xml:space="preserve"><tspan fill="#56d364" font-weight="bold">OK</tspan>    uploads        in the latest snapshot: /srv/app/uploads</text>
+<text x="20" y="291" xml:space="preserve"></text>
+<text x="20" y="309" xml:space="preserve">1 error, 3 warnings, 3 ok, 1 info</text>
+<text x="20" y="327" xml:space="preserve"></text>
+<text x="20" y="345" xml:space="preserve"># ... copy-db, back up, verify, restore-test ...</text>
+<text x="20" y="363" xml:space="preserve"></text>
+<text x="20" y="381" xml:space="preserve"><tspan fill="#8b949e">$</tspan><tspan fill="#ffffff" font-weight="bold"> server-durability check</tspan></text>
+<text x="20" y="399" xml:space="preserve"><tspan fill="#e3b341" font-weight="bold">WARN</tspan>  backup         the backup repository is the only copy</text>
+<text x="20" y="417" xml:space="preserve"><tspan fill="#8b949e">                     fix: copy the repository to another machine and add it as a [[backup_copy]]</tspan></text>
+<text x="20" y="435" xml:space="preserve"><tspan fill="#79c0ff" font-weight="bold">INFO</tspan>  machine        file system and disk checks are skipped on this system (no /proc/self/mountinfo)</text>
+<text x="20" y="453" xml:space="preserve"><tspan fill="#56d364" font-weight="bold">OK</tspan>    orders         SQLite database, WAL mode</text>
+<text x="20" y="471" xml:space="preserve"><tspan fill="#56d364" font-weight="bold">OK</tspan>    backup         the latest snapshot (c45013f8) is 0 minutes old</text>
+<text x="20" y="489" xml:space="preserve"><tspan fill="#56d364" font-weight="bold">OK</tspan>    orders         in the latest snapshot: /srv/db-copies/orders.db</text>
+<text x="20" y="507" xml:space="preserve"><tspan fill="#56d364" font-weight="bold">OK</tspan>    uploads        in the latest snapshot: /srv/app/uploads</text>
+<text x="20" y="525" xml:space="preserve"><tspan fill="#56d364" font-weight="bold">OK</tspan>    restore test   last restore test: 0 minutes ago, all data restored and opened</text>
+<text x="20" y="543" xml:space="preserve"></text>
+<text x="20" y="561" xml:space="preserve">1 warning, 5 ok, 1 info</text>
+</g></svg>

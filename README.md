@@ -1,6 +1,10 @@
 # server-durability
 
-**Can this server lose data? Check the data, the backup and the restore.**
+A command-line tool that checks whether a single Linux or macOS server can lose data: it audits your databases and files, your restic backup, and whether the backup can really be restored.
+
+![Terminal output of server-durability check: first a report with one error and three warnings, then a clean report after the fixes](docs/demo.svg)
+
+The picture is real output from `examples/demo.sh` on macOS, where the disk checks are skipped (the second report is shortened to the last `check`). The text version, from Linux, is below.
 
 A single server usually has a database or two and a nightly backup, and everyone assumes it is fine. Often
 it is not:
@@ -72,7 +76,11 @@ go install github.com/YauhenBichel/server-durability/cmd/server-durability@lates
 ```
 
 Linux and macOS. The disk and file system checks need Linux. The backup tool is [restic](https://restic.net)
-for now, and it must be installed.
+for now, and it must be installed. You need Go to use `go install`.
+
+Or download a binary for Linux (amd64, arm64) or macOS (arm64) from the
+[releases page](https://github.com/YauhenBichel/server-durability/releases), with a `SHA256SUMS` file to check it.
+Check the install with `server-durability version`.
 
 ## Quick start
 
@@ -108,7 +116,59 @@ user = true
 ```
 
 To try it without touching your own files, run [`examples/demo.sh`](examples/demo.sh). It creates a test
-server in a temporary directory and prints the two reports above.
+server in a temporary directory and prints the two reports above. It needs `restic` and `python3`:
+
+```bash
+git clone https://github.com/YauhenBichel/server-durability && cd server-durability
+go build -o server-durability ./cmd/server-durability
+SD=./server-durability bash examples/demo.sh
+```
+
+Expected: a first `check` that ends with `1 error, ...` (the database is missing from the backup), and a last
+`check` with no error.
+
+## When to use it
+
+- You run one server (a home server, a VPS, a small company box) with SQLite databases and files that matter.
+- You have a restic backup, or you think you do, and want to know if it holds everything and can be restored.
+- You want a check you can run from cron or monitoring and that exits non-zero when something is wrong.
+
+## When not to use it
+
+- You run a database cluster, PostgreSQL or MySQL: use their own backup and replication tools.
+- You use borg, kopia, rsync or a cloud backup: only restic is supported today.
+- You want a backup tool. This tool does not make backups. It checks them.
+
+## FAQ
+
+### How do I check that my backup works?
+
+Run `server-durability restore-test`. It restores into a temporary directory, checks each SQLite database
+and compares the row count with the live one. Your real files are not touched.
+
+### How do I back up a SQLite database that is being written?
+
+Do not copy the file. Run `server-durability copy-db`, which uses the SQLite backup API, and back up the
+copy. In the experiments below a plain copy lost committed rows.
+
+### Does it send my data anywhere?
+
+No. It makes no network connections itself. It reads your config file, your data paths and the backup
+repository through the `restic` command, which talks to wherever your repository is.
+
+### Does it change my data?
+
+No. It writes only the database copies from `copy-db` and the restore test report. `restore-test` restores
+into a temporary directory and deletes it.
+
+### How is it different from restic, borg or Backrest?
+
+Those make and store backups. This checks that the backups cover your data, are on another disk, and restore.
+Use it next to your backup tool.
+
+### Does it work on macOS or Windows?
+
+It runs on macOS, but the disk and file system checks are skipped there. Windows is not tested.
 
 ## Commands
 
